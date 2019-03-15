@@ -1,0 +1,116 @@
+# Project: adams
+# Date: 2019-03-15 16:58:30
+# User: fracpete
+# Charset: UTF-8
+# Modules: adams-access,adams-compress,adams-core,adams-event,adams-excel,adams-groovy,adams-imaging,adams-imaging-boofcv,adams-imaging-imagemagick,adams-imaging-openimaj,adams-jython,adams-meta,adams-ml,adams-net,adams-odf,adams-pdf,adams-python,adams-rsync,adams-spreadsheet,adams-timeseries,adams-visualstats,adams-weka
+#
+adams.flow.control.Flow -annotation "Converts the AFSIS MS Access database into SQLite" -error-handling ACTORS_DECIDE_TO_STOP_ON_ERROR -flow-execution-listener adams.flow.execution.NullListener -flow-restart-manager adams.flow.control.flowrestart.NullManager
+ adams.flow.standalone.CallableActors
+  adams.flow.sink.Display -name Progress -short-title true -display-type adams.flow.core.displaytype.Default -writer adams.data.io.output.NullWriter
+  adams.flow.control.Sequence -name "importing file"
+   adams.flow.transformer.BaseName
+   adams.flow.transformer.StringInsert -position first -value "Importing file: "
+   adams.flow.sink.CallableSink -callable Progress
+  adams.flow.control.Sequence -name "fixing file"
+   adams.flow.transformer.BaseName
+   adams.flow.transformer.StringInsert -position first -value "Fixing file: "
+   adams.flow.sink.CallableSink -callable Progress
+  adams.flow.control.Sequence -name "merging files"
+   adams.flow.control.ArrayProcess
+    adams.flow.transformer.BaseName
+   adams.flow.transformer.StringJoin -glue ", "
+   adams.flow.transformer.StringInsert -position first -value "Merging files: "
+   adams.flow.sink.CallableSink -callable Progress
+ adams.flow.source.Start
+ adams.flow.control.Trigger -name "prompt user"
+  adams.flow.source.EnterManyValues -stop-if-canceled true -value "adams.flow.source.valuedefinition.DefaultValueDefinition -name access_db -display \"MS Access Database\" -type FILE_ABSOLUTE -default-value /home/fracpete/development/projects/afsis-db-sqlite/ICRAF_ISRIC_VNIR_Soil_Database.mdb -use-forward-slashes true" -value "adams.flow.source.valuedefinition.DefaultValueDefinition -name tmp_dir -display \"Temp output directory\" -type DIRECTORY_ABSOLUTE -default-value /home/fracpete/development/projects/afsis-db-sqlite/tmp/ -use-forward-slashes true" -value "adams.flow.source.valuedefinition.DefaultValueDefinition -name sqlite_db -display \"SQLite database file\" -type FILE_ABSOLUTE -default-value /home/fracpete/development/projects/afsis-db-sqlite/ICRAF_ISRIC_VNIR_Soil_Database.db -use-forward-slashes true" -output-type MAP
+  adams.flow.transformer.MapToVariables
+  adams.flow.transformer.SetVariable -name "db url" -var-name db_url -var-value jdbc:sqlite:/@{sqlite_db} -expand-value true
+  adams.flow.control.Trigger -name "create tmp dir"
+   adams.flow.source.Variable -var-name tmp_dir -conversion adams.data.conversion.StringToString
+   adams.flow.transformer.MakeDir
+ adams.flow.control.Trigger -name "export data"
+  adams.flow.source.Variable -var-name access_db -conversion adams.data.conversion.StringToString
+  adams.flow.transformer.AccessDatabaseInfo
+  adams.flow.transformer.SetVariable -var-name table
+  adams.flow.control.Tee -name progress
+   adams.flow.transformer.StringInsert -position first -value "Exporting table: "
+   adams.flow.sink.CallableSink -callable Progress
+  adams.flow.control.Trigger -name "determine output file"
+   adams.flow.source.Variable -var-name tmp_dir -conversion adams.data.conversion.StringToString
+   adams.flow.transformer.AppendName -name "add table name" -suffix @{table}
+   adams.flow.transformer.AppendName -name "add extension" -suffix .csv -no-separator true
+   adams.flow.transformer.SetVariable -var-name outfile
+  adams.flow.control.Trigger -name "extract table data"
+   adams.flow.source.Variable -var-name access_db -conversion adams.data.conversion.StringToString
+   adams.flow.transformer.SpreadSheetFileReader -reader "adams.data.io.input.AccessSpreadSheetReader -data-row-type adams.data.spreadsheet.DenseDataRow -spreadsheet-type adams.data.spreadsheet.DefaultSpreadSheet -table @{table}"
+   adams.flow.sink.SpreadSheetFileWriter -output @{outfile} -writer adams.data.io.output.CsvSpreadSheetWriter
+ adams.flow.control.Trigger -name "fix data"
+  adams.flow.standalone.CallableActors
+   adams.flow.transformer.StringReplace -name "remove \"W\" from wave numbers" -find w(.*) -replace $1
+   adams.flow.transformer.StringReplace -name "fix labid" -find batch.*labid -replace batch_labid
+   adams.flow.control.ConditionalSubProcess -name "prefix header" -condition "adams.flow.condition.bool.Expression -expression \"not ((\\\\\\\"X\\\\\\\" = \\\\\\\"iso\\\\\\\") or (\\\\\\\"X\\\\\\\" = \\\\\\\"id\\\\\\\") or (\\\\\\\"X\\\\\\\" = \\\\\\\"hori\\\\\\\") or (\\\\\\\"X\\\\\\\" = \\\\\\\"btop\\\\\\\") or (\\\\\\\"X\\\\\\\" = \\\\\\\"bbot\\\\\\\") or (\\\\\\\"X\\\\\\\" = \\\\\\\"top\\\\\\\") or (\\\\\\\"X\\\\\\\" = \\\\\\\"bot\\\\\\\") or (\\\\\\\"X\\\\\\\" = \\\\\\\"sampleno\\\\\\\"))\""
+    adams.flow.transformer.StringInsert -name pefix -position first -value @{prefix}. -variable true
+  adams.flow.source.FileSystemSearch -search "adams.flow.source.filesystemsearch.LocalFileSearch -directory @{tmp_dir} -regexp .*.csv -sorting SORT_BY_NAME"
+  adams.flow.transformer.SetVariable -var-name file
+  adams.flow.control.Tee -name "lowercase headers"
+   adams.flow.control.Tee -name progress
+    adams.flow.sink.CallableSink -callable "fixing file"
+   adams.flow.transformer.SpreadSheetFileReader -reader "adams.data.io.input.CsvSpreadSheetReader -data-row-type adams.data.spreadsheet.DenseDataRow -spreadsheet-type adams.data.spreadsheet.DefaultSpreadSheet -missing \"\""
+   adams.flow.transformer.SpreadSheetConvertHeaderCells -conversion adams.data.conversion.LowerCase
+   adams.flow.sink.SpreadSheetFileWriter -output @{file} -writer adams.data.io.output.CsvSpreadSheetWriter
+  adams.flow.control.ConditionalTee -name "prefix headers" -condition "adams.flow.condition.bool.Expression -expression \"matches(\\\\\\\"X\\\\\\\", \\\\\\\".*Soluble_salts.*\\\\\\\") \\\\nor matches(\\\\\\\"X\\\\\\\", \\\\\\\".*Physical_properties.*\\\\\\\")\\\\nor matches(\\\\\\\"X\\\\\\\", \\\\\\\".*Chemical_properties.*\\\\\\\")\\\\nor matches(\\\\\\\"X\\\\\\\", \\\\\\\".*Clay_mineralogy.*\\\\\\\") \\\\nor matches(\\\\\\\"X\\\\\\\", \\\\\\\".*Elemental_composition_clay.*\\\\\\\")\\\\nor matches(\\\\\\\"X\\\\\\\", \\\\\\\".*Elemental_composition_soil.*\\\\\\\")\\\\nor matches(\\\\\\\"X\\\\\\\", \\\\\\\".*Sand_mineralogy_general.*\\\\\\\")\\\\n\""
+   adams.flow.control.Tee -name progress
+    adams.flow.sink.CallableSink -callable "fixing file"
+   adams.flow.control.Tee -name "create prefix"
+    adams.flow.transformer.BaseName -remove-extensions true
+    adams.flow.transformer.Convert -conversion adams.data.conversion.LowerCase
+    adams.flow.transformer.StringReplace -find (soluble_|_properties|composition_|_general) -type ALL
+    adams.flow.transformer.StringReplace -name "shorten elemental" -find elemental -replace elem -type ALL
+    adams.flow.transformer.StringReplace -name "shorten physical" -find physical -replace phys -type ALL
+    adams.flow.transformer.StringReplace -name "shorten mineralogy" -find mineralogy -replace mineral -type ALL
+    adams.flow.transformer.StringReplace -name "shorten chemical" -find chemical -replace chem -type ALL
+    adams.flow.transformer.SetVariable -var-name prefix
+   adams.flow.transformer.SpreadSheetFileReader -reader "adams.data.io.input.CsvSpreadSheetReader -data-row-type adams.data.spreadsheet.DenseDataRow -spreadsheet-type adams.data.spreadsheet.DefaultSpreadSheet -missing \"\""
+   adams.flow.transformer.SpreadSheetTransformHeaderCells -transformer "prefix header"
+   adams.flow.sink.SpreadSheetFileWriter -output @{file} -writer adams.data.io.output.CsvSpreadSheetWriter
+  adams.flow.control.ConditionalTee -name "sample codes" -condition "adams.flow.condition.bool.Expression -expression \"matches(\\\\\\\"X\\\\\\\", \\\\\\\".*sample codes.*\\\\\\\")\""
+   adams.flow.control.Tee -name progress
+    adams.flow.sink.CallableSink -callable "fixing file"
+   adams.flow.transformer.SpreadSheetFileReader -reader "adams.data.io.input.CsvSpreadSheetReader -data-row-type adams.data.spreadsheet.DenseDataRow -spreadsheet-type adams.data.spreadsheet.DefaultSpreadSheet -missing \"\""
+   adams.flow.transformer.SpreadSheetTransformHeaderCells -transformer "fix labid"
+   adams.flow.sink.SpreadSheetFileWriter -output @{file} -writer adams.data.io.output.CsvSpreadSheetWriter
+  adams.flow.control.ConditionalTee -name spectra -condition "adams.flow.condition.bool.Expression -expression \"matches(\\\\\\\"X\\\\\\\", \\\\\\\".*ASD Spectra.*\\\\\\\")\""
+   adams.flow.control.Tee -name progress
+    adams.flow.sink.CallableSink -callable "fixing file"
+   adams.flow.transformer.SpreadSheetFileReader -reader "adams.data.io.input.CsvSpreadSheetReader -data-row-type adams.data.spreadsheet.DenseDataRow -spreadsheet-type adams.data.spreadsheet.DefaultSpreadSheet -missing \"\""
+   adams.flow.transformer.SpreadSheetTransformHeaderCells -transformer "remove \"W\" from wave numbers"
+   adams.flow.sink.SpreadSheetFileWriter -output @{file} -writer adams.data.io.output.CsvSpreadSheetWriter
+ adams.flow.control.Trigger -name "merge data"
+  adams.flow.source.Start
+  adams.flow.control.Trigger -name "merge spectra with sample codes"
+   adams.flow.standalone.SetVariable -var-name outfile -var-value "@{tmp_dir}/Merged Spectra.csv" -expand-value true
+   adams.flow.source.StringConstants -output-array true -string "@{tmp_dir}/ASD Spectra.csv" -string "@{tmp_dir}/ICRAF sample codes.csv" -conversion adams.data.conversion.StringToString
+   adams.flow.control.Tee -name progress
+    adams.flow.sink.CallableSink -callable "merging files"
+   adams.flow.control.ArrayProcess
+    adams.flow.transformer.ExpandVariables
+    adams.flow.transformer.SpreadSheetFileReader -reader "adams.data.io.input.CsvSpreadSheetReader -data-row-type adams.data.spreadsheet.DenseDataRow -spreadsheet-type adams.data.spreadsheet.DefaultSpreadSheet -missing \"\""
+   adams.flow.transformer.SpreadSheetMerge -unique-id batch_labid
+   adams.flow.sink.SpreadSheetFileWriter -output @{outfile} -writer adams.data.io.output.CsvSpreadSheetWriter
+ adams.flow.control.Trigger -name "import data"
+  adams.flow.standalone.DatabaseConnection -url @{db_url} -data-type-setup adams.db.datatype.DummySetup
+  adams.flow.source.FileSystemSearch -search "adams.flow.source.filesystemsearch.LocalFileSearch -directory @{tmp_dir} -regexp .*.csv -sorting SORT_BY_NAME"
+  adams.flow.control.Tee -name progress
+   adams.flow.sink.CallableSink -callable "importing file"
+  adams.flow.control.Tee -name tablename
+   adams.flow.transformer.BaseName -remove-extensions true
+   adams.flow.transformer.Convert -conversion adams.data.conversion.LowerCase
+   adams.flow.transformer.StringSanitizer -acceptable abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_ -replace _
+   adams.flow.transformer.SetVariable -var-name table
+  adams.flow.transformer.SpreadSheetFileReader -reader "adams.data.io.input.CsvSpreadSheetReader -data-row-type adams.data.spreadsheet.DenseDataRow -spreadsheet-type adams.data.spreadsheet.DefaultSpreadSheet"
+  adams.flow.control.SubProcess -name "fixing headers"
+   adams.flow.transformer.SpreadSheetConvertHeaderCells -name "wave numbers" -conversion "adams.data.conversion.StringExpression -expression \"if (matches(X, \\\\\\\"[0-9]+\\\\\\\"), concatenate(\\\\\\\"wave-\\\\\\\", X), X)\""
+   adams.flow.transformer.SpreadSheetConvertHeaderCells -name "sql keywords" -conversion "adams.data.conversion.StringExpression -expression \"if (matches(X, \\\\\\\"(order|date|top|as)\\\\\\\"), concatenate(X, \\\\\\\"_\\\\\\\"), X)\""
+   adams.flow.transformer.SpreadSheetConvertHeaderCells -name spaces -conversion "adams.data.conversion.StringExpression -expression \"substitute(X, \\\\\\\" \\\\\\\", \\\\\\\"_\\\\\\\")\""
+  adams.flow.sink.SpreadSheetDbWriter -type-mapper adams.data.spreadsheet.sql.DefaultTypeMapper -table @{table} -column-name-conversion LOWER_CASE -batch-size 1000
