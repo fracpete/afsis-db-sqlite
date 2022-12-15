@@ -16,10 +16,17 @@ port of this database.
 ## Conversion to SQLite
 
 An [ADAMS](https://adams.cms.waikato.ac.nz/) workflow was used 
-([access2sqlite.flow](https://raw.githubusercontent.com/fracpete/afsis-db-sqlite/master/access2sqlite.flow)) 
+([access2sqlite.flow](access2sqlite.flow)) 
 to export the MS Access database to intermediate CSV files and
 then imported into a SQLite database.
 
+## Exporting SQLite
+
+Using the [export_sqlite.flow](export_sqlite.flow), the spectra stored
+in the SQLite database can be exported to different formats.
+
 ## License
 
-[Creative Commons (CC BY-NC)](https://web.archive.org/web/20161025184945/http://www.isric.org/data/icrafisric-spectral-library)
+* Data: [Creative Commons (CC BY-NC)](https://web.archive.org/web/20161025184945/http://www.isric.org/data/icrafisric-spectral-library)
+* ADAMS flows: [MIT](https://opensource.org/licenses/MIT)
+
